@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>癌症诊断：贝叶斯公式可视化 (修复版)</title>
+    <!-- 修改点1：使用国内 BootCDN 加速，确保加载成功 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --panel-bg: #fff;
+            --true-neg: #e2e8f0; 
+            --false-pos: #4fd1c5;
+            --true-pos: #f56565;
+            --false-neg: #2d3748;
+        }
+
+        body { font-family: "Microsoft YaHei", sans-serif; margin: 0; padding: 0; background: var(--bg-color); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        header { background: #fff; padding: 10px 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; height: 60px; box-sizing: border-box; }
+        h1 { margin: 0; font-size: 1.2rem; color: #333; font-weight: bold; }
+        
+        /* 布局优化 */
+        .controls { display: flex; gap: 20px; align-items: center; }
+        .slider-group { display: flex; flex-direction: column; width: 180px; }
+        .slider-group label { font-size: 0.8rem; color: #555; display: flex; justify-content: space-between; margin-bottom: 2px; }
+        .slider-group input { cursor: pointer; height: 4px; }
+
+        .main-container { flex: 1; display: flex; gap: 10px; padding: 10px; height: calc(100vh - 60px); box-sizing: border-box; }
+
+        /* 左侧 */
+        .visual-panel { flex: 2; background: var(--panel-bg); border-radius: 8px; border: 1px solid #e1e4e8; display: flex; flex-direction: column; position: relative; overflow: hidden; min-width: 0; }
+        .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; cursor: crosshair; overflow: hidden; }
+        
+        .legend-box { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.95); padding: 12px; border-radius: 6px; border: 1px solid #eee; box-shadow: 0 4px 12px rgba(0,0,0,0.08); font-size: 13px; z-index: 10; min-width: 140px; }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+        
+        .view-btn { position: absolute; top: 10px; right: 10px; z-index: 10; background: #3182ce; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .view-btn:hover { background: #2c5282; }
+
+        /* 右侧 */
+        .stats-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 300px; max-width: 400px; }
+        
+        .chart-card { flex: 1; background: var(--panel-bg); border-radius: 8px; padding: 15px; border: 1px solid #e1e4e8; position: relative; display: flex; flex-direction: column; min-height: 0; }
+        .card-title { font-size: 14px; font-weight: bold; color: #2d3748; margin-bottom: 8px; border-left: 4px solid #3182ce; padding-left: 8px; }
+        
+        .chart-container { flex: 1; position: relative; min-height: 0; width: 100%; }
+        
+        /* 结果框 */
+        .result-highlight { text-align: center; margin-top: auto; padding: 10px; background: #ebf8ff; border-radius: 6px; border: 1px solid #bee3f8; }
+        .result-desc { font-size: 12px; color: #4a5568; }
+        .result-val { font-weight: bold; font-size: 18px; color: #2b6cb0; }
+        .result-big-val { font-size: 32px; font-weight: bold; color: #e53e3e; line-height: 1; display: block; margin: 5px 0; }
+
+        /* 错误提示 */
+        #error-msg { position:fixed; bottom:0; left:0; right:0; background:red; color:white; padding:10px; text-align:center; display:none; z-index:999; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>概率实验：贝叶斯公式可视化</h1>
+    <div class="controls">
+        <div class="slider-group">
+            <label><span>发病率 P(C)</span> <b id="val-pC">0.5%</b></label>
+            <input type="range" id="sl-pC" min="0.1" max="20" step="0.1" value="0.5" oninput="app.update()">
+        </div>
+        <div class="slider-group">
+            <label><span>灵敏度 P(A|C)</span> <b id="val-sens">95%</b></label>
+            <input type="range" id="sl-sens" min="50" max="99.9" step="0.1" value="95" oninput="app.update()">
+        </div>
+        <div class="slider-group">
+            <label><span>误诊率 P(A|C̅)</span> <b id="val-fpr">4%</b></label>
+            <input type="range" id="sl-fpr" min="0.1" max="20" step="0.1" value="4" oninput="app.update()">
+        </div>
+    </div>
+</header>
+
+<div class="main-container">
+    <div class="visual-panel">
+        <div class="legend-box">
+            <div style="margin-bottom:6px"><span class="dot" style="background:var(--true-pos)"></span> 真阳性 (有病) <b id="txt-tp"></b></div>
+            <div style="margin-bottom:6px"><span class="dot" style="background:var(--false-pos)"></span> 假阳性 (误诊) <b id="txt-fp"></b></div>
+            <div style="margin-bottom:6px; opacity:0.6"><span class="dot" style="background:var(--true-neg)"></span> 真阴性 (健康) <span id="txt-tn"></span></div>
+            <div style="opacity:0.6"><span class="dot" style="background:var(--false-neg)"></span> 假阴性 (漏诊) <span id="txt-fn"></span></div>
+        </div>
+        
+        <button class="view-btn" onclick="app.toggleSort()">🔁 切换视图: 散乱/分类</button>
+        
+        <div class="canvas-wrapper" id="canvasContainer">
+            <canvas id="mainCanvas"></canvas>
+        </div>
+        <div style="position: absolute; bottom: 8px; left: 10px; color: #718096; font-size: 12px; background: rgba(255,255,255,0.9); padding: 4px 8px; border-radius:4px; pointer-events:none;">
+            N=10,000 个模拟粒子 | 左图实时渲染中
+        </div>
+    </div>
+
+    <div class="stats-panel">
+        <div class="chart-card" style="flex: 1.5">
+            <div class="card-title">1. 阳性人群成分分析</div>
+            <div class="chart-container">
+                <canvas id="barChart"></canvas>
+            </div>
+            <div class="result-highlight">
+                <span class="result-desc">每发现 1 个真病人，就要误抓</span><br>
+                <span id="txt-ratio" class="result-val">-</span>
+                <span class="result-desc"> 个健康人</span>
+            </div>
+        </div>
+
+        <div class="chart-card" style="flex: 1.2">
+            <div class="card-title">2. P(C|A) 变化趋势 (教材图)</div>
+            <div class="chart-container">
+                <canvas id="lineChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card" style="flex: 0.8; justify-content: center; background: #fff5f5; border-color: #fc8181;">
+            <div class="card-title" style="border-color: #e53e3e;">3. 逆概率计算结果</div>
+            <div style="text-align: center;">
+                <span class="result-big-val" id="txt-final-prob">0.00%</span>
+                <span class="result-desc">拿到阳性单，你真的有病的概率</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="error-msg"></div>
+
+<script>
+const app = {
+    // 全局状态
+    particles: [],
+    totalN: 10000,
+    isSorted: false,
+    chartBar: null,
+    chartLine: null,
+    width: 0,
+    height: 0,
+    colors: { tp: '#f56565', fp: '#4fd1c5', tn: '#e2e8f0', fn: '#2d3748' },
+
+    // 初始化入口
+    init: function() {
+        try {
+            this.initCanvas();
+            this.initParticles();
+            this.initCharts(); // 尝试初始化图表
+            this.update();     // 计算数值
+            this.animate();    // 开始动画循环
+        } catch (e) {
+            console.error(e);
+            document.getElementById('error-msg').style.display = 'block';
+            document.getElementById('error-msg').innerText = "发生错误: " + e.message;
+        }
+        
+        // 监听窗口缩放
+        window.addEventListener('resize', () => {
+            this.initCanvas(); 
+            this.recalcPositionsOnly(); 
+        });
+    },
+
+    // 1. 画布设置
+    initCanvas: function() {
+        const container = document.getElementById('canvasContainer');
+        const canvas = document.getElementById('mainCanvas');
+        this.width = container.clientWidth;
+        this.height = container.clientHeight;
+        
+        // 增加DPR支持让圆点更清晰
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = this.width * dpr;
+        canvas.height = this.height * dpr;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+    },
+
+    // 2. 初始化粒子对象
+    initParticles: function() {
+        this.particles = [];
+        for(let i=0; i<this.totalN; i++) {
+            this.particles.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                tx: 0, ty: 0, // Target position
+                type: 'tn',
+                speed: 0.15 + Math.random() * 0.1
+            });
+        }
+    },
+
+    // 3. 更新所有数据逻辑
+    update: function() {
+        // 读取滑块
+        const pC = parseFloat(document.getElementById('sl-pC').value) / 100;
+        const sens = parseFloat(document.getElementById('sl-sens').value) / 100;
+        const fpr = parseFloat(document.getElementById('sl-fpr').value) / 100;
+
+        // UI 更新
+        document.getElementById('val-pC').innerText = (pC*100).toFixed(1) + "%";
+        document.getElementById('val-sens').innerText = (sens*100).toFixed(1) + "%";
+        document.getElementById('val-fpr').innerText = (fpr*100).toFixed(1) + "%";
+
+        // 数学计算分类
+        const countCancer = Math.round(this.totalN * pC);
+        const countHealthy = this.totalN - countCancer;
+        const countTP = Math.round(countCancer * sens);
+        const countFN = countCancer - countTP;
+        const countFP = Math.round(countHealthy * fpr);
+        const countTN = countHealthy - countFP;
+
+        // 更新左侧粒子类型 (为了性能，我们只是按顺序分配)
+        let idx = 0;
+        // 先分配 TP
+        for(let i=0; i<countTP; i++) this.particles[idx++].type = 'tp';
+        // 分配 FN
+        for(let i=0; i<countFN; i++) this.particles[idx++].type = 'fn';
+        // 分配 FP
+        for(let i=0; i<countFP; i++) this.particles[idx++].type = 'fp';
+        // 分配 TN
+        for(let i=0; i<countTN; i++) this.particles[idx++].type = 'tn';
+
+        // 更新图例数字
+        document.getElementById('txt-tp').innerText = countTP;
+        document.getElementById('txt-fp').innerText = countFP;
+        document.getElementById('txt-tn').innerText = countTN;
+        document.getElementById('txt-fn').innerText = countFN;
+
+        // 更新计算结论
+        const totalPos = countTP + countFP;
+        const finalProb = totalPos > 0 ? (countTP / totalPos * 100) : 0;
+        const ratio = countTP > 0 ? (countFP / countTP) : 0;
+        
+        document.getElementById('txt-final-prob').innerText = finalProb.toFixed(2) + "%";
+        document.getElementById('txt-ratio').innerText = ratio.toFixed(1);
+
+        // 计算目标位置
+        this.recalcPositionsOnly();
+
+        // 更新图表 (加个安全检查)
+        if(this.chartBar && this.chartLine) {
+            this.updateCharts(countTP, countFP, finalProb);
+        }
+    },
+
+    // 重新计算粒子的目标位置
+    recalcPositionsOnly: function() {
+        if(!this.isSorted) {
+            // 随机分布
+            for(let p of this.particles) {
+                p.tx = Math.random() * this.width;
+                p.ty = Math.random() * this.height;
+            }
+        } else {
+            // 分类视图：将不同类别的点引导到不同区域
+            // 我们构建一个简单的格子布局
+            let tpI=0, fpI=0, restI=0;
+            const cx = this.width / 2;
+            const cy = this.height / 2;
+            
+            for(let p of this.particles) {
+                if(p.type === 'tp') {
+                    // 真阳性(红)：放在屏幕正中左侧
+                    const col = tpI % 20; const row = Math.floor(tpI/20);
+                    p.tx = cx - 20 - (col * 5);
+                    p.ty = cy - 50 + (row * 5);
+                    tpI++;
+                } else if(p.type === 'fp') {
+                    // 假阳性(绿)：放在屏幕正中右侧
+                    const col = fpI % 20; const row = Math.floor(fpI/20);
+                    p.tx = cx + 20 + (col * 5);
+                    p.ty = cy - 50 + (row * 5);
+                    fpI++;
+                } else {
+                    // 其他点沉底
+                    const cols = Math.floor(this.width / 3);
+                    p.tx = (restI % cols) * 3;
+                    p.ty = this.height - 10 - Math.floor(restI/cols) * 3;
+                    restI++;
+                }
+            }
+        }
+    },
+
+    toggleSort: function() {
+        this.isSorted = !this.isSorted;
+        this.recalcPositionsOnly();
+    },
+
+    // 动画主循环
+    animate: function() {
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, this.width, this.height);
+
+        // 遍历所有点并绘制
+        // 我们不进行太复杂的物理模拟，只做线性插值(Lerp)
+        let activePoints = 0;
+        
+        // 为了确保阳性点不被遮挡，我们最后绘制 TP 和 FP
+        // 先排序渲染在Canvas中比较耗性能，所以这里分两次循环或者由于数量小直接循环
+        // 简单起见，直接画
+        
+        for(let p of this.particles) {
+            // 移动
+            const dx = p.tx - p.x;
+            const dy = p.ty - p.y;
+            // 距离检测
+            if(Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+                p.x += dx * p.speed;
+                p.y += dy * p.speed;
+            } else {
+                p.x = p.tx;
+                p.y = p.ty;
+            }
+
+            // 绘制
+            ctx.beginPath();
+            ctx.fillStyle = this.colors[p.type];
+            // 阳性的点画大一点
+            const size = (p.type === 'tp' || p.type === 'fp') ? 3 : 1.5;
+            ctx.arc(p.x, p.y, size, 0, Math.PI*2);
+            ctx.fill();
+        }
+
+        requestAnimationFrame(() => this.animate());
+    },
+
+    // 图表初始化 (增加容错)
+    initCharts: function() {
+        if(typeof Chart === 'undefined') {
+            console.warn('Chart.js未加载，图表功能不可用');
+            return;
+        }
+
+        const ctxBar = document.getElementById('barChart').getContext('2d');
+        this.chartBar = new Chart(ctxBar, {
+            type: 'bar',
+            data: {
+                labels: ['确诊(真)', '误诊(假)'],
+                datasets: [{
+                    label: '人数',
+                    data: [0, 0],
+                    backgroundColor: [this.colors.tp, this.colors.fp],
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        const ctxLine = document.getElementById('lineChart').getContext('2d');
+        this.chartLine = new Chart(ctxLine, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'P(C|A)', borderColor: '#3182ce', borderWidth: 2, tension: 0.4, pointRadius: 0, data: [] },
+                    { label: 'Current', backgroundColor: '#e53e3e', pointRadius: 5, showLine:false, data: [] }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    x: { type: 'linear', min: 0, max: 20, title: {display:true, text:'先验 P(C)%'} },
+                    y: { min:0, max:100 }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    },
+
+    updateCharts: function(tp, fp, prob) {
+        if(!this.chartBar || !this.chartLine) return;
+
+        // Update Bar
+        this.chartBar.data.datasets[0].data = [tp, fp];
+        this.chartBar.update();
+
+        // Update Line
+        // 重新生成曲线
+        const pC_val = parseFloat(document.getElementById('sl-pC').value); // 0-20
+        const sens = parseFloat(document.getElementById('sl-sens').value) / 100;
+        const fpr = parseFloat(document.getElementById('sl-fpr').value) / 100;
+        
+        const curveData = [];
+        for(let x=0.1; x<=20; x+=0.5) {
+            const pr = x/100;
+            const y = (sens * pr) / (sens*pr + fpr*(1-pr)) * 100;
+            curveData.push({x: x, y: y});
+        }
+        
+        this.chartLine.data.datasets[0].data = curveData;
+        this.chartLine.data.datasets[1].data = [{x: pC_val, y: prob}];
+        this.chartLine.update('none'); // 无动画模式刷新
+    }
+};
+
+// 启动
+window.onload = function() {
+    app.init();
+};
+</script>
+</body>
+</html>
