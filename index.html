@@ -3,76 +3,114 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>癌症诊断：贝叶斯公式可视化 (修复版)</title>
-    <!-- 修改点1：使用国内 BootCDN 加速，确保加载成功 -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <title>贝叶斯可视化：稳定随机版</title>
     <style>
         :root {
             --bg-color: #f0f2f5;
             --panel-bg: #fff;
-            --true-neg: #e2e8f0; 
-            --false-pos: #4fd1c5;
-            --true-pos: #f56565;
+            --true-neg: #cbd5e0; 
+            --false-pos: #4fd1c5; /* 干扰项：青色 */
+            --true-pos: #f56565;  /* 目标项：红色 */
             --false-neg: #2d3748;
+            --primary: #3182ce;
         }
 
-        body { font-family: "Microsoft YaHei", sans-serif; margin: 0; padding: 0; background: var(--bg-color); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        body { font-family: "Microsoft YaHei", -apple-system, sans-serif; margin: 0; padding: 0; background: var(--bg-color); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
-        header { background: #fff; padding: 10px 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; height: 60px; box-sizing: border-box; }
-        h1 { margin: 0; font-size: 1.2rem; color: #333; font-weight: bold; }
+        /* 顶部导航 */
+        header { background: #fff; padding: 0 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; height: 65px; flex-shrink: 0; }
+        .header-left h1 { margin: 0; font-size: 1.2rem; color: #2d3748; font-weight: 800; }
+        .header-left small { color: #718096; font-size: 0.8rem; }
         
-        /* 布局优化 */
-        .controls { display: flex; gap: 20px; align-items: center; }
-        .slider-group { display: flex; flex-direction: column; width: 180px; }
-        .slider-group label { font-size: 0.8rem; color: #555; display: flex; justify-content: space-between; margin-bottom: 2px; }
-        .slider-group input { cursor: pointer; height: 4px; }
+        .controls { display: flex; gap: 30px; align-items: center; }
+        .slider-group { display: flex; flex-direction: column; width: 160px; position: relative; }
+        .slider-group label { font-size: 0.75rem; color: #718096; font-weight: 600; display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .slider-group input { cursor: pointer; height: 4px; background: #e2e8f0; border-radius: 2px; -webkit-appearance: none; }
+        .slider-group input::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--primary); cursor: pointer; margin-top: -5px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        .slider-group input::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: #e2e8f0; border-radius: 2px; }
 
-        .main-container { flex: 1; display: flex; gap: 10px; padding: 10px; height: calc(100vh - 60px); box-sizing: border-box; }
+        /* 随机按钮 */
+        .btn-random {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border: none; padding: 8px 16px; border-radius: 20px;
+            cursor: pointer; font-weight: bold; font-size: 0.9rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.3s ease; display: flex; align-items: center; gap: 5px;
+        }
+        .btn-random:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+
+        /* 场景提示条 */
+        #scenario-toast {
+            position: absolute; top: 75px; left: 50%; transform: translateX(-50%);
+            background: #2d3748; color: #fff; padding: 10px 20px; border-radius: 30px;
+            font-size: 0.85rem; opacity: 0; pointer-events: none; transition: all 0.4s;
+            z-index: 99; box-shadow: 0 4px 15px rgba(0,0,0,0.2); text-align: center;
+        }
+
+        /* 主布局 */
+        .main-container { flex: 1; display: flex; gap: 12px; padding: 12px; height: calc(100vh - 65px); box-sizing: border-box; }
 
         /* 左侧 */
-        .visual-panel { flex: 2; background: var(--panel-bg); border-radius: 8px; border: 1px solid #e1e4e8; display: flex; flex-direction: column; position: relative; overflow: hidden; min-width: 0; }
-        .canvas-wrapper { flex: 1; position: relative; width: 100%; height: 100%; cursor: crosshair; overflow: hidden; }
+        .visual-panel { flex: 2; background: var(--panel-bg); border-radius: 12px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; position: relative; overflow: hidden; min-width: 0; }
+        .canvas-wrapper { flex: 1; width: 100%; height: 100%; cursor: crosshair; }
         
-        .legend-box { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.95); padding: 12px; border-radius: 6px; border: 1px solid #eee; box-shadow: 0 4px 12px rgba(0,0,0,0.08); font-size: 13px; z-index: 10; min-width: 140px; }
-        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
-        
-        .view-btn { position: absolute; top: 10px; right: 10px; z-index: 10; background: #3182ce; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .view-btn:hover { background: #2c5282; }
+        .legend-box { position: absolute; top: 15px; left: 15px; background: rgba(255,255,255,0.9); backdrop-filter: blur(4px); padding: 12px; border-radius: 8px; border: 1px solid #edf2f7; box-shadow: 0 4px 6px rgba(0,0,0,0.05); font-size: 13px; z-index: 10; width: 140px; }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+
+        .btn-view { position: absolute; top: 15px; right: 15px; background: white; border: 1px solid #cbd5e0; color: #4a5568; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.05); z-index: 10;}
 
         /* 右侧 */
-        .stats-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 300px; max-width: 400px; }
+        .stats-panel { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 320px; max-width: 420px; }
         
-        .chart-card { flex: 1; background: var(--panel-bg); border-radius: 8px; padding: 15px; border: 1px solid #e1e4e8; position: relative; display: flex; flex-direction: column; min-height: 0; }
-        .card-title { font-size: 14px; font-weight: bold; color: #2d3748; margin-bottom: 8px; border-left: 4px solid #3182ce; padding-left: 8px; }
+        .card { flex: 1; background: var(--panel-bg); border-radius: 12px; padding: 16px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; position: relative; min-height: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .card h3 { font-size: 0.9rem; font-weight: 700; color: #4a5568; margin: 0 0 10px 0; border-left: 3px solid var(--primary); padding-left: 8px; }
         
-        .chart-container { flex: 1; position: relative; min-height: 0; width: 100%; }
+        /* 确保图表容器有高度 */
+        .chart-wrapper { flex: 1; position: relative; width: 100%; min-height: 150px; overflow: hidden; }
         
-        /* 结果框 */
-        .result-highlight { text-align: center; margin-top: auto; padding: 10px; background: #ebf8ff; border-radius: 6px; border: 1px solid #bee3f8; }
-        .result-desc { font-size: 12px; color: #4a5568; }
-        .result-val { font-weight: bold; font-size: 18px; color: #2b6cb0; }
-        .result-big-val { font-size: 32px; font-weight: bold; color: #e53e3e; line-height: 1; display: block; margin: 5px 0; }
-
-        /* 错误提示 */
-        #error-msg { position:fixed; bottom:0; left:0; right:0; background:red; color:white; padding:10px; text-align:center; display:none; z-index:999; }
+        /* 加载失败提示 */
+        .chart-error { position: absolute; top:0; left:0; right:0; bottom:0; display: flex; align-items: center; justify-content: center; text-align: center; color: #e53e3e; font-size: 0.85rem; background: #fff5f5; border-radius: 8px; padding: 20px; z-index: 20; }
+        
+        .result-box {
+            text-align: center; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px;
+            padding: 10px; margin-top: auto; display: flex; align-items: center; justify-content: center; gap: 15px;
+        }
+        .res-ratio { font-size: 0.8rem; color: #744210; background: #fefcbf; padding: 4px 8px; border-radius: 4px; }
+        .res-prob { display: flex; flex-direction: column; }
+        .res-val { font-size: 1.8rem; font-weight: 800; color: #e53e3e; line-height: 1; }
+        .res-label { font-size: 0.75rem; color: #718096; margin-top: 4px; }
+        
+        #error-global { position: fixed; bottom: 20px; right: 20px; background: #e53e3e; color: white; padding: 15px; border-radius: 8px; display: none; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
     </style>
+    <!-- 关键修复：更换为 Staticfile CDN (七牛云)，国内非常稳定 -->
+    <script src="https://cdn.staticfile.org/Chart.js/3.9.1/chart.min.js"></script>
 </head>
 <body>
 
 <header>
-    <h1>概率实验：贝叶斯公式可视化</h1>
+    <div class="header-left">
+        <h1>贝叶斯公式可视化</h1>
+        <small>N=10,000 粒子实时模拟</small>
+    </div>
+    
+    <div id="scenario-toast">当前场景：随机加载中...</div>
+
     <div class="controls">
+        <button class="btn-random" onclick="app.randomScenario()">
+            <span>🎲</span> 随机案例
+        </button>
+
         <div class="slider-group">
             <label><span>发病率 P(C)</span> <b id="val-pC">0.5%</b></label>
-            <input type="range" id="sl-pC" min="0.1" max="20" step="0.1" value="0.5" oninput="app.update()">
+            <input type="range" id="sl-pC" min="0.1" max="50" step="0.1" value="0.5" oninput="app.manualUpdate()">
         </div>
         <div class="slider-group">
             <label><span>灵敏度 P(A|C)</span> <b id="val-sens">95%</b></label>
-            <input type="range" id="sl-sens" min="50" max="99.9" step="0.1" value="95" oninput="app.update()">
+            <input type="range" id="sl-sens" min="50" max="99.9" step="0.1" value="95" oninput="app.manualUpdate()">
         </div>
         <div class="slider-group">
             <label><span>误诊率 P(A|C̅)</span> <b id="val-fpr">4%</b></label>
-            <input type="range" id="sl-fpr" min="0.1" max="20" step="0.1" value="4" oninput="app.update()">
+            <input type="range" id="sl-fpr" min="0.1" max="20" step="0.1" value="4" oninput="app.manualUpdate()">
         </div>
     </div>
 </header>
@@ -80,258 +118,284 @@
 <div class="main-container">
     <div class="visual-panel">
         <div class="legend-box">
-            <div style="margin-bottom:6px"><span class="dot" style="background:var(--true-pos)"></span> 真阳性 (有病) <b id="txt-tp"></b></div>
-            <div style="margin-bottom:6px"><span class="dot" style="background:var(--false-pos)"></span> 假阳性 (误诊) <b id="txt-fp"></b></div>
-            <div style="margin-bottom:6px; opacity:0.6"><span class="dot" style="background:var(--true-neg)"></span> 真阴性 (健康) <span id="txt-tn"></span></div>
-            <div style="opacity:0.6"><span class="dot" style="background:var(--false-neg)"></span> 假阴性 (漏诊) <span id="txt-fn"></span></div>
+            <div style="margin-bottom:6px"><span class="dot" style="background:var(--true-pos)"></span> 有病 (真阳) <b id="txt-tp" style="float:right"></b></div>
+            <div style="margin-bottom:6px"><span class="dot" style="background:var(--false-pos)"></span> 误诊 (假阳) <b id="txt-fp" style="float:right"></b></div>
+            <div style="margin-bottom:6px; color:#718096"><span class="dot" style="background:var(--true-neg)"></span> 健康 (真阴) <span id="txt-tn" style="float:right"></span></div>
+            <div style="color:#718096"><span class="dot" style="background:var(--false-neg)"></span> 漏诊 (假阴) <span id="txt-fn" style="float:right"></span></div>
         </div>
         
-        <button class="view-btn" onclick="app.toggleSort()">🔁 切换视图: 散乱/分类</button>
+        <button class="btn-view" onclick="app.toggleSort()">🔁 切换: 散乱 / 排序</button>
         
         <div class="canvas-wrapper" id="canvasContainer">
             <canvas id="mainCanvas"></canvas>
         </div>
-        <div style="position: absolute; bottom: 8px; left: 10px; color: #718096; font-size: 12px; background: rgba(255,255,255,0.9); padding: 4px 8px; border-radius:4px; pointer-events:none;">
-            N=10,000 个模拟粒子 | 左图实时渲染中
-        </div>
     </div>
 
     <div class="stats-panel">
-        <div class="chart-card" style="flex: 1.5">
-            <div class="card-title">1. 阳性人群成分分析</div>
-            <div class="chart-container">
+        <!-- 柱状图 -->
+        <div class="card" style="flex: 1.2">
+            <h3>📊 阳性人群成分分析</h3>
+            <div class="chart-wrapper" id="bar-wrapper">
                 <canvas id="barChart"></canvas>
             </div>
-            <div class="result-highlight">
-                <span class="result-desc">每发现 1 个真病人，就要误抓</span><br>
-                <span id="txt-ratio" class="result-val">-</span>
-                <span class="result-desc"> 个健康人</span>
+            <div class="result-box" style="margin-top:10px; background: #ebf8ff; border-color:#bee3f8;">
+                <span class="res-ratio" id="txt-ratio-box" style="background:white; border:1px solid #90cdf4; color:#2b6cb0;">
+                    1真 : 8.4假
+                </span>
+                <span style="font-size:0.8rem; color:#2c5282;">← 每找出1个病人，需误抓的人数</span>
             </div>
         </div>
 
-        <div class="chart-card" style="flex: 1.2">
-            <div class="card-title">2. P(C|A) 变化趋势 (教材图)</div>
-            <div class="chart-container">
+        <!-- 曲线图 -->
+        <div class="card" style="flex: 1">
+            <h3>📈 概率趋势 (P(C|A) vs 先验)</h3>
+            <div class="chart-wrapper" id="line-wrapper">
                 <canvas id="lineChart"></canvas>
             </div>
         </div>
 
-        <div class="chart-card" style="flex: 0.8; justify-content: center; background: #fff5f5; border-color: #fc8181;">
-            <div class="card-title" style="border-color: #e53e3e;">3. 逆概率计算结果</div>
-            <div style="text-align: center;">
-                <span class="result-big-val" id="txt-final-prob">0.00%</span>
-                <span class="result-desc">拿到阳性单，你真的有病的概率</span>
+        <div class="card" style="flex: 0.8; justify-content: center; border-left: 5px solid #e53e3e;">
+            <h3 style="border:none; margin:0; text-align: center; color:#e53e3e;">最终计算结论</h3>
+            <div class="result-box" style="border:none; background:transparent;">
+                <div class="res-prob">
+                    <span class="res-val" id="txt-final-prob">0.00%</span>
+                    <span class="res-label">P(C|A) 确诊概率</span>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<div id="error-msg"></div>
+<div id="error-global"></div>
 
 <script>
 const app = {
-    // 全局状态
-    particles: [],
+    // 核心配置
     totalN: 10000,
+    particles: [],
     isSorted: false,
+    width: 0, 
+    height: 0,
+    ctx: null,
+    
+    // 图表实例
     chartBar: null,
     chartLine: null,
-    width: 0,
-    height: 0,
-    colors: { tp: '#f56565', fp: '#4fd1c5', tn: '#e2e8f0', fn: '#2d3748' },
 
-    // 初始化入口
+    // 颜色系统
+    colors: { tp: '#f56565', fp: '#4fd1c5', tn: '#cbd5e0', fn: '#2d3748' },
+
+    // 预设场景库
+    scenarios: [
+        { 
+            name: "🧪 罕见病筛查", 
+            desc: "发病率极低，误诊造成的假阳性远多于真阳性。",
+            pC_range: [0.1, 0.8], sens_range: [95, 99], fpr_range: [2, 5] 
+        },
+        { 
+            name: "🧬 精密仪器检测", 
+            desc: "精度极高(误诊<0.5%)，结果高度可信。",
+            pC_range: [0.2, 1.0], sens_range: [99, 99.9], fpr_range: [0.1, 0.5] 
+        },
+        { 
+            name: "🦠 病毒流行季", 
+            desc: "发病率高(>10%)，检测的可信度自然提升。",
+            pC_range: [10, 15], sens_range: [85, 95], fpr_range: [3, 8] 
+        },
+        { 
+            name: "🏚️ 廉价试纸初筛", 
+            desc: "灵敏度低、误诊率高。只能用于粗查。",
+            pC_range: [1, 3], sens_range: [70, 85], fpr_range: [10, 20] 
+        }
+    ],
+
     init: function() {
         try {
             this.initCanvas();
             this.initParticles();
-            this.initCharts(); // 尝试初始化图表
-            this.update();     // 计算数值
-            this.animate();    // 开始动画循环
-        } catch (e) {
+            this.initCharts(); // 尝试初始化
+            
+            // 延时一点再跑第一次随机，确保Canvas布局完成
+            setTimeout(() => this.randomScenario(), 100);
+            
+            this.animate();
+        } catch(e) {
             console.error(e);
-            document.getElementById('error-msg').style.display = 'block';
-            document.getElementById('error-msg').innerText = "发生错误: " + e.message;
+            document.getElementById('error-global').style.display = 'block';
+            document.getElementById('error-global').innerText = "程序初始化异常: " + e.message;
         }
         
-        // 监听窗口缩放
-        window.addEventListener('resize', () => {
+        window.addEventListener('resize', () => { 
             this.initCanvas(); 
-            this.recalcPositionsOnly(); 
+            this.recalcPositions();
         });
     },
 
-    // 1. 画布设置
+    randomScenario: function() {
+        const scene = this.scenarios[Math.floor(Math.random() * this.scenarios.length)];
+        const rand = (min, max) => (Math.random() * (max - min) + min).toFixed(1);
+        
+        document.getElementById('sl-pC').value = rand(...scene.pC_range);
+        document.getElementById('sl-sens').value = rand(...scene.sens_range);
+        document.getElementById('sl-fpr').value = rand(...scene.fpr_range);
+
+        this.showToast(scene.name, scene.desc);
+        this.updateData();
+    },
+
+    showToast: function(title, desc) {
+        const t = document.getElementById('scenario-toast');
+        t.innerHTML = `<strong>${title}</strong><br><span style="opacity:0.9">${desc}</span>`;
+        t.style.opacity = 1;
+        t.style.top = "80px";
+        if(this.toastTimer) clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => { t.style.opacity = 0; t.style.top = "65px"; }, 4000);
+    },
+
+    manualUpdate: function() {
+        this.updateData();
+    },
+
     initCanvas: function() {
-        const container = document.getElementById('canvasContainer');
-        const canvas = document.getElementById('mainCanvas');
-        this.width = container.clientWidth;
-        this.height = container.clientHeight;
-        
-        // 增加DPR支持让圆点更清晰
+        const c = document.getElementById('canvasContainer');
+        const cvs = document.getElementById('mainCanvas');
+        this.width = c.clientWidth;
+        this.height = c.clientHeight;
         const dpr = window.devicePixelRatio || 1;
-        canvas.width = this.width * dpr;
-        canvas.height = this.height * dpr;
-        
-        const ctx = canvas.getContext('2d');
-        ctx.scale(dpr, dpr);
+        cvs.width = this.width * dpr;
+        cvs.height = this.height * dpr;
+        this.ctx = cvs.getContext('2d');
+        this.ctx.scale(dpr, dpr);
     },
 
-    // 2. 初始化粒子对象
     initParticles: function() {
-        this.particles = [];
-        for(let i=0; i<this.totalN; i++) {
-            this.particles.push({
-                x: Math.random() * this.width,
-                y: Math.random() * this.height,
-                tx: 0, ty: 0, // Target position
-                type: 'tn',
-                speed: 0.15 + Math.random() * 0.1
-            });
-        }
+        this.particles = Array.from({length: this.totalN}, () => ({
+            x: Math.random() * this.width,
+            y: Math.random() * this.height,
+            tx: 0, ty: 0,
+            type: 'tn',
+            speed: 0.1 + Math.random() * 0.15
+        }));
     },
 
-    // 3. 更新所有数据逻辑
-    update: function() {
-        // 读取滑块
-        const pC = parseFloat(document.getElementById('sl-pC').value) / 100;
-        const sens = parseFloat(document.getElementById('sl-sens').value) / 100;
-        const fpr = parseFloat(document.getElementById('sl-fpr').value) / 100;
+    updateData: function() {
+        // 读取
+        const pC_val = parseFloat(document.getElementById('sl-pC').value);
+        const sens_val = parseFloat(document.getElementById('sl-sens').value);
+        const fpr_val = parseFloat(document.getElementById('sl-fpr').value);
 
-        // UI 更新
-        document.getElementById('val-pC').innerText = (pC*100).toFixed(1) + "%";
-        document.getElementById('val-sens').innerText = (sens*100).toFixed(1) + "%";
-        document.getElementById('val-fpr').innerText = (fpr*100).toFixed(1) + "%";
+        const pC = pC_val / 100;
+        const sens = sens_val / 100;
+        const fpr = fpr_val / 100;
 
-        // 数学计算分类
-        const countCancer = Math.round(this.totalN * pC);
-        const countHealthy = this.totalN - countCancer;
-        const countTP = Math.round(countCancer * sens);
-        const countFN = countCancer - countTP;
-        const countFP = Math.round(countHealthy * fpr);
-        const countTN = countHealthy - countFP;
+        // UI
+        document.getElementById('val-pC').innerText = pC_val.toFixed(1) + "%";
+        document.getElementById('val-sens').innerText = sens_val.toFixed(1) + "%";
+        document.getElementById('val-fpr').innerText = fpr_val.toFixed(1) + "%";
 
-        // 更新左侧粒子类型 (为了性能，我们只是按顺序分配)
+        // 计算
+        const nTP = Math.round(this.totalN * pC * sens);
+        const nFN = Math.round(this.totalN * pC * (1-sens));
+        const nFP = Math.round(this.totalN * (1-pC) * fpr);
+        const nTN = this.totalN - nTP - nFN - nFP;
+
+        // 分配粒子
         let idx = 0;
-        // 先分配 TP
-        for(let i=0; i<countTP; i++) this.particles[idx++].type = 'tp';
-        // 分配 FN
-        for(let i=0; i<countFN; i++) this.particles[idx++].type = 'fn';
-        // 分配 FP
-        for(let i=0; i<countFP; i++) this.particles[idx++].type = 'fp';
-        // 分配 TN
-        for(let i=0; i<countTN; i++) this.particles[idx++].type = 'tn';
-
-        // 更新图例数字
-        document.getElementById('txt-tp').innerText = countTP;
-        document.getElementById('txt-fp').innerText = countFP;
-        document.getElementById('txt-tn').innerText = countTN;
-        document.getElementById('txt-fn').innerText = countFN;
-
-        // 更新计算结论
-        const totalPos = countTP + countFP;
-        const finalProb = totalPos > 0 ? (countTP / totalPos * 100) : 0;
-        const ratio = countTP > 0 ? (countFP / countTP) : 0;
+        const setType = (n, type) => { for(let i=0; i<n; i++) if(idx < this.totalN) this.particles[idx++].type = type; };
         
+        setType(nTP, 'tp');
+        setType(nFP, 'fp');
+        setType(nFN, 'fn');
+        setType(nTN, 'tn');
+        while(idx < this.totalN) this.particles[idx++].type = 'tn';
+
+        // 更新数字
+        document.getElementById('txt-tp').innerText = nTP;
+        document.getElementById('txt-fp').innerText = nFP;
+        document.getElementById('txt-fn').innerText = nFN;
+        document.getElementById('txt-tn').innerText = nTN;
+
+        const totalPos = nTP + nFP;
+        const finalProb = totalPos > 0 ? (nTP / totalPos * 100) : 0;
+        const ratio = nTP > 0 ? (nFP / nTP).toFixed(1) : "-";
+
         document.getElementById('txt-final-prob').innerText = finalProb.toFixed(2) + "%";
-        document.getElementById('txt-ratio').innerText = ratio.toFixed(1);
+        document.getElementById('txt-ratio-box').innerText = `1真 : ${ratio}假`;
 
-        // 计算目标位置
-        this.recalcPositionsOnly();
-
-        // 更新图表 (加个安全检查)
+        this.recalcPositions();
+        
+        // 尝试更新图表，如果实例存在
         if(this.chartBar && this.chartLine) {
-            this.updateCharts(countTP, countFP, finalProb);
+            this.updateCharts(nTP, nFP, pC_val, sens, fpr, finalProb);
         }
     },
 
-    // 重新计算粒子的目标位置
-    recalcPositionsOnly: function() {
+    recalcPositions: function() {
         if(!this.isSorted) {
-            // 随机分布
-            for(let p of this.particles) {
+            this.particles.forEach(p => {
                 p.tx = Math.random() * this.width;
                 p.ty = Math.random() * this.height;
-            }
+            });
         } else {
-            // 分类视图：将不同类别的点引导到不同区域
-            // 我们构建一个简单的格子布局
-            let tpI=0, fpI=0, restI=0;
+            let iTP=0, iFP=0, iRest=0;
             const cx = this.width / 2;
             const cy = this.height / 2;
             
-            for(let p of this.particles) {
+            // 简单Grid布局
+            this.particles.forEach(p => {
                 if(p.type === 'tp') {
-                    // 真阳性(红)：放在屏幕正中左侧
-                    const col = tpI % 20; const row = Math.floor(tpI/20);
-                    p.tx = cx - 20 - (col * 5);
+                    const col = iTP % 20; const row = Math.floor(iTP / 20);
+                    p.tx = cx - 15 - (col * 5); 
                     p.ty = cy - 50 + (row * 5);
-                    tpI++;
+                    iTP++;
                 } else if(p.type === 'fp') {
-                    // 假阳性(绿)：放在屏幕正中右侧
-                    const col = fpI % 20; const row = Math.floor(fpI/20);
-                    p.tx = cx + 20 + (col * 5);
+                    const col = iFP % 20; const row = Math.floor(iFP / 20);
+                    p.tx = cx + 15 + (col * 5); 
                     p.ty = cy - 50 + (row * 5);
-                    fpI++;
+                    iFP++;
                 } else {
-                    // 其他点沉底
-                    const cols = Math.floor(this.width / 3);
-                    p.tx = (restI % cols) * 3;
-                    p.ty = this.height - 10 - Math.floor(restI/cols) * 3;
-                    restI++;
+                    const cols = Math.floor(this.width / 3.5);
+                    p.tx = (iRest % cols) * 3.5;
+                    p.ty = this.height - 5 - (Math.floor(iRest / cols) * 3.5);
+                    iRest++;
                 }
-            }
+            });
         }
     },
 
     toggleSort: function() {
         this.isSorted = !this.isSorted;
-        this.recalcPositionsOnly();
+        this.recalcPositions();
     },
 
-    // 动画主循环
     animate: function() {
-        const canvas = document.getElementById('mainCanvas');
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, this.width, this.height);
+        const { ctx, width, height } = this;
+        ctx.clearRect(0, 0, width, height);
 
-        // 遍历所有点并绘制
-        // 我们不进行太复杂的物理模拟，只做线性插值(Lerp)
-        let activePoints = 0;
-        
-        // 为了确保阳性点不被遮挡，我们最后绘制 TP 和 FP
-        // 先排序渲染在Canvas中比较耗性能，所以这里分两次循环或者由于数量小直接循环
-        // 简单起见，直接画
-        
-        for(let p of this.particles) {
-            // 移动
+        for(let i=0; i<this.totalN; i++) {
+            const p = this.particles[i];
             const dx = p.tx - p.x;
             const dy = p.ty - p.y;
-            // 距离检测
-            if(Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-                p.x += dx * p.speed;
-                p.y += dy * p.speed;
-            } else {
-                p.x = p.tx;
-                p.y = p.ty;
+            
+            if((dx > 0.1 || dx < -0.1) || (dy > 0.1 || dy < -0.1)) {
+                p.x += dx * 0.15; 
+                p.y += dy * 0.15;
             }
-
-            // 绘制
-            ctx.beginPath();
             ctx.fillStyle = this.colors[p.type];
-            // 阳性的点画大一点
-            const size = (p.type === 'tp' || p.type === 'fp') ? 3 : 1.5;
-            ctx.arc(p.x, p.y, size, 0, Math.PI*2);
+            ctx.beginPath();
+            const size = (p.type==='tp'||p.type==='fp') ? 2.5 : 1.5;
+            ctx.arc(p.x, p.y, size, 0, 6.28);
             ctx.fill();
         }
-
         requestAnimationFrame(() => this.animate());
     },
 
-    // 图表初始化 (增加容错)
     initCharts: function() {
+        // 安全检测：如果CDN挂了，Chat是undefined
         if(typeof Chart === 'undefined') {
-            console.warn('Chart.js未加载，图表功能不可用');
+            const errHTML = `<div class="chart-error">⚠️ 图表组件连接超时<br>Staticfile CDN 响应慢，请刷新重试</div>`;
+            document.getElementById('bar-wrapper').innerHTML = errHTML;
+            document.getElementById('line-wrapper').innerHTML = errHTML;
             return;
         }
 
@@ -339,18 +403,13 @@ const app = {
         this.chartBar = new Chart(ctxBar, {
             type: 'bar',
             data: {
-                labels: ['确诊(真)', '误诊(假)'],
-                datasets: [{
-                    label: '人数',
-                    data: [0, 0],
-                    backgroundColor: [this.colors.tp, this.colors.fp],
-                    borderRadius: 4
-                }]
+                labels: ['有病(真)', '误诊(假)'],
+                datasets: [{ label: '人数', data:[0,0], backgroundColor:[this.colors.tp, this.colors.fp], borderRadius:5 }]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } }
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: false },
+                scales: { y: { beginAtZero: true, grid: { display: false } } }
             }
         });
 
@@ -358,54 +417,41 @@ const app = {
         this.chartLine = new Chart(ctxLine, {
             type: 'line',
             data: {
-                labels: [],
                 datasets: [
-                    { label: 'P(C|A)', borderColor: '#3182ce', borderWidth: 2, tension: 0.4, pointRadius: 0, data: [] },
-                    { label: 'Current', backgroundColor: '#e53e3e', pointRadius: 5, showLine:false, data: [] }
+                    { label:'P(C|A)', data:[], borderColor:this.colors.tp, borderWidth:2, pointRadius:0, tension:0.3 },
+                    { label:'Current', data:[], pointBackgroundColor: this.colors.tp, pointRadius:5, showLine:false }
                 ]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: false },
                 scales: { 
-                    x: { type: 'linear', min: 0, max: 20, title: {display:true, text:'先验 P(C)%'} },
+                    x: { type:'linear', min:0, max:50, title:{display:true, text:'先验 P(C)%'} },
                     y: { min:0, max:100 }
-                },
-                plugins: { legend: { display: false } }
+                }
             }
         });
     },
 
-    updateCharts: function(tp, fp, prob) {
-        if(!this.chartBar || !this.chartLine) return;
-
-        // Update Bar
+    updateCharts: function(tp, fp, currPC, sens, fpr, prob) {
+        // Bar
         this.chartBar.data.datasets[0].data = [tp, fp];
         this.chartBar.update();
 
-        // Update Line
-        // 重新生成曲线
-        const pC_val = parseFloat(document.getElementById('sl-pC').value); // 0-20
-        const sens = parseFloat(document.getElementById('sl-sens').value) / 100;
-        const fpr = parseFloat(document.getElementById('sl-fpr').value) / 100;
-        
-        const curveData = [];
-        for(let x=0.1; x<=20; x+=0.5) {
+        // Line
+        const data = [];
+        for(let x=0.1; x<=50; x+=1) {
             const pr = x/100;
-            const y = (sens * pr) / (sens*pr + fpr*(1-pr)) * 100;
-            curveData.push({x: x, y: y});
+            const y = (sens * pr) / ((sens*pr) + (fpr*(1-pr))) * 100;
+            data.push({x:x, y:y});
         }
-        
-        this.chartLine.data.datasets[0].data = curveData;
-        this.chartLine.data.datasets[1].data = [{x: pC_val, y: prob}];
-        this.chartLine.update('none'); // 无动画模式刷新
+        this.chartLine.data.datasets[0].data = data;
+        this.chartLine.data.datasets[1].data = [{x: currPC, y: prob}];
+        this.chartLine.update('none');
     }
 };
 
-// 启动
-window.onload = function() {
-    app.init();
-};
+window.onload = () => app.init();
 </script>
 </body>
 </html>
